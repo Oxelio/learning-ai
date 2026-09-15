@@ -1,194 +1,14 @@
-from pathlib import Path
-
 import torch
 import torch.nn as nn
 
-from torch.utils.data import DataLoader
-from torchvision import datasets
-from torchvision.transforms import v2
-
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIRECTORY = PROJECT_ROOT / "data"
-
-
-CLASS_NAMES = [
-    "T-shirt/top",
-    "Trouser",
-    "Pullover",
-    "Dress",
-    "Coat",
-    "Sandal",
-    "Shirt",
-    "Sneaker",
-    "Bag",
-    "Ankle boot",
-]
-
-
-def create_model() -> nn.Module:
-    """
-    Create a neural network for Fashion-MNIST classification.
-
-    Input:
-        1 x 28 x 28 image
-
-    Output:
-        10 logits, one for each class
-    """
-
-    return nn.Sequential(
-        nn.Flatten(),
-
-        nn.Linear(28 * 28, 256),
-        nn.ReLU(),
-
-        nn.Linear(256, 128),
-        nn.ReLU(),
-
-        nn.Linear(128, 10),
-    )
-
-
-def train_one_epoch(
-    model: nn.Module,
-    data_loader: DataLoader,
-    loss_fn: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    device: torch.device,
-) -> tuple[float, float]:
-    """
-    Train the model for one epoch.
-
-    Returns:
-        average_loss
-        accuracy
-    """
-
-    model.train()
-
-    total_loss = 0.0
-    correct = 0
-    total = 0
-
-    for images, labels in data_loader:
-        images = images.to(
-            device,
-            non_blocking=True,
-        )
-
-        labels = labels.to(
-            device,
-            non_blocking=True,
-        )
-
-        # Forward pass
-        logits = model(images)
-
-        # Calculate loss
-        loss = loss_fn(
-            logits,
-            labels,
-        )
-
-        # Reset previous gradients
-        optimizer.zero_grad()
-
-        # Backpropagation
-        loss.backward()
-
-        # Update model parameters
-        optimizer.step()
-
-        # Accumulate loss
-        total_loss += (
-            loss.item()
-            * images.size(0)
-        )
-
-        # Select the class with the highest logit
-        predictions = logits.argmax(dim=1)
-
-        correct += (
-            predictions == labels
-        ).sum().item()
-
-        total += labels.size(0)
-
-    average_loss = (
-        total_loss
-        / total
-    )
-
-    accuracy = (
-        correct
-        / total
-    )
-
-    return average_loss, accuracy
-
-
-def evaluate(
-    model: nn.Module,
-    data_loader: DataLoader,
-    loss_fn: nn.Module,
-    device: torch.device,
-) -> tuple[float, float]:
-    """
-    Evaluate the model without computing gradients.
-    """
-
-    model.eval()
-
-    total_loss = 0.0
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for images, labels in data_loader:
-            images = images.to(
-                device,
-                non_blocking=True,
-            )
-
-            labels = labels.to(
-                device,
-                non_blocking=True,
-            )
-
-            logits = model(images)
-
-            loss = loss_fn(
-                logits,
-                labels,
-            )
-
-            total_loss += (
-                loss.item()
-                * images.size(0)
-            )
-
-            predictions = logits.argmax(
-                dim=1
-            )
-
-            correct += (
-                predictions == labels
-            ).sum().item()
-
-            total += labels.size(0)
-
-    average_loss = (
-        total_loss
-        / total
-    )
-
-    accuracy = (
-        correct
-        / total
-    )
-
-    return average_loss, accuracy
+from fashion_mnist import (
+    CLASS_NAMES,
+    FashionMLP,
+    create_dataloaders,
+    create_datasets,
+    evaluate_epoch,
+    train_one_epoch,
+)
 
 
 def main():
@@ -208,53 +28,22 @@ def main():
             "GPU :",
             torch.cuda.get_device_name(0),
         )
-
         print(
             "HIP :",
             torch.version.hip,
         )
 
-    # ------------------------------------------------------------
-    # Transform
-    # ------------------------------------------------------------
-
-    transform = v2.Compose(
-        [
-            v2.ToImage(),
-            v2.ToDtype(
-                torch.float32,
-                scale=True,
-            ),
-        ]
-    )
-
-    # ------------------------------------------------------------
-    # Dataset
-    # ------------------------------------------------------------
-
-    train_dataset = datasets.FashionMNIST(
-        root=DATA_DIRECTORY,
-        train=True,
-        download=True,
-        transform=transform,
-    )
-
-    test_dataset = datasets.FashionMNIST(
-        root=DATA_DIRECTORY,
-        train=False,
-        download=True,
-        transform=transform,
+    train_dataset, test_dataset = (
+        create_datasets()
     )
 
     print()
     print("Dataset")
     print("-------")
-
     print(
         "Training samples :",
         len(train_dataset),
     )
-
     print(
         "Test samples :",
         len(test_dataset),
@@ -262,23 +51,14 @@ def main():
 
     image, label = train_dataset[0]
 
-    print(
-        "Image shape :",
-        image.shape,
-    )
-
-    print(
-        "Image dtype :",
-        image.dtype,
-    )
-
+    print("Image shape :", image.shape)
+    print("Image dtype :", image.dtype)
     print(
         "Pixel range :",
         f"{image.min().item():.3f}",
         "->",
         f"{image.max().item():.3f}",
     )
-
     print(
         "Example label :",
         label,
@@ -286,79 +66,45 @@ def main():
         CLASS_NAMES[label],
     )
 
-    # ------------------------------------------------------------
-    # DataLoaders
-    # ------------------------------------------------------------
-
     batch_size = 128
 
-    pin_memory = torch.cuda.is_available()
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=pin_memory,
-    )
-
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=pin_memory,
+    train_loader, test_loader = (
+        create_dataloaders(
+            train_dataset,
+            test_dataset,
+            batch_size=batch_size,
+            num_workers=0,
+            pin_memory=torch.cuda.is_available(),
+        )
     )
 
     print()
     print("DataLoader")
     print("----------")
-
-    print(
-        "Batch size :",
-        batch_size,
-    )
-
+    print("Batch size :", batch_size)
     print(
         "Training batches :",
         len(train_loader),
     )
-
     print(
         "Test batches :",
         len(test_loader),
     )
 
-    # ------------------------------------------------------------
-    # Model
-    # ------------------------------------------------------------
-
-    model = create_model().to(device)
+    model = FashionMLP().to(device)
 
     print()
     print("Model")
     print("-----")
     print(model)
 
-    # ------------------------------------------------------------
-    # Loss
-    # ------------------------------------------------------------
-
     loss_fn = nn.CrossEntropyLoss()
-
-    # ------------------------------------------------------------
-    # Optimizer
-    # ------------------------------------------------------------
 
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=0.001,
         weight_decay=0.0,
     )
-
-    # ------------------------------------------------------------
-    # Training
-    # ------------------------------------------------------------
 
     epochs = 10
 
@@ -367,19 +113,23 @@ def main():
     print("--------")
 
     for epoch in range(epochs):
-        train_loss, train_accuracy = train_one_epoch(
-            model,
-            train_loader,
-            loss_fn,
-            optimizer,
-            device,
+        train_loss, train_accuracy = (
+            train_one_epoch(
+                model,
+                train_loader,
+                loss_fn,
+                optimizer,
+                device,
+            )
         )
 
-        test_loss, test_accuracy = evaluate(
-            model,
-            test_loader,
-            loss_fn,
-            device,
+        test_loss, test_accuracy = (
+            evaluate_epoch(
+                model,
+                test_loader,
+                loss_fn,
+                device,
+            )
         )
 
         print(
@@ -389,10 +139,6 @@ def main():
             f"Test loss: {test_loss:.4f} | "
             f"Test: {test_accuracy * 100:.2f}%"
         )
-
-    # ------------------------------------------------------------
-    # Manual predictions
-    # ------------------------------------------------------------
 
     print()
     print("Predictions")
@@ -417,13 +163,17 @@ def main():
                 dim=1,
             )
 
-            predicted_class = (
-                probabilities.argmax(dim=1).item()
+            predicted_class = int(
+                probabilities
+                .argmax(dim=1)
+                .item()
             )
 
-            confidence = (
-                probabilities[0, predicted_class]
-                .item()
+            confidence = float(
+                probabilities[
+                    0,
+                    predicted_class,
+                ].item()
             )
 
             print(
